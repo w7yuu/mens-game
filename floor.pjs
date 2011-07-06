@@ -1,0 +1,291 @@
+/*
+ *  author: Wu Zhe <wu@madk.org>
+ *
+ *  Feel free to do anything with the source code.
+ */
+
+
+int canvas_width = 500;
+int canvas_height = 750;
+byte blk_type_num = 5;
+int blk_int = 75;
+int blk_w = 100;
+int blk_h = 5;
+float blk_speed = -1.0;
+float gravity = 0.15;
+float blk_friction = 0.09;
+float air_friction = 0.06;
+float keypress_force = 0.15;
+float spring_blk_force = -8;
+float rolling_blk_rx = 1;
+int blk_vanish_timer = 20;
+
+byte num;
+Block[] blks;
+Person p;
+PImage[] blk_imgs;
+PImage p_img;
+
+PFont fontA = loadFont("Arial");
+textFont(fontA, 20);
+
+void setup() {
+  size(canvas_width, canvas_height);
+  frameRate(50);
+  stroke(#eeffee);
+
+  // load images
+  blk_imgs = new PImage[blk_type_num];
+  for (byte i = 0; i < blk_type_num; i++) {
+    blk_imgs[i] = loadImage("blk_" + str(i) + ".png");
+  }
+  p_img = loadImage("p.png");
+
+  num = byte(height / blk_int);
+  blks = new Block[num];
+  init_x = random(width);
+  init_y = height;
+  blks[0] = new Block(init_x, init_y, blk_speed, 0);
+  for (byte i = 1; i < num; i++) {
+    blks[i] = new Block(random(width), height+blk_int*i, blk_speed, floor(random(5)));
+  }
+  p = new Person(init_x, init_y, 0, blk_speed, 0);
+}
+
+void draw() {
+  background(#223322);
+
+  for (byte i = blks.length-1; i >= 0; i--) {
+    blks[i].move();
+    if (blks[i].outofscreen()) {
+      blks[i] = new Block(random(width), height, blk_speed, floor(random(5)));
+      p.level += 1;
+    }
+    blks[i].render();
+  }
+
+  p.move();
+  p.update_mode();
+  p.render();
+}
+
+class Person {
+  float x, y; // bottom center
+  float prex, prey;
+  int w = 24;
+  int h = 54;
+  float vx, vy;
+  float rx;
+  float friction = blk_friction;
+  float mileage = 0;
+  int level = 0;
+
+  int health = 100;
+  byte on_blk, prev_on_blk;
+
+  Person(float x, float y, float vx, float vy, byte on_blk) {
+    this.x = x;
+    this.y = y;
+    this.prex = x;
+    this.prey = y;
+    this.vx = vx;
+    this.vy = vy;
+    this.on_blk = on_blk;
+    this.pre_on_blk = prev_on_blk;
+    this.rx = blks[on_blk].rx;
+  }
+
+  boolean x_on_blk(byte i) {
+    return (blks[i].x - blk_w/2 <= x) && (x <= blks[i].x + blk_w/2);
+  }
+
+  boolean person_on_blk(byte i) {
+    return x_on_blk(i) && (this.prey+blk_speed <= blks[i].y) && (blks[i].y <= this.y-blk_speed);
+  }
+
+  void update_mode() {
+    // player dies
+    if (this.y <= 0 || this.y >= height || this.health <= 0) {
+      this.health = 0;
+      if (this.level >= 100) {
+        is_man = "you are a real man";
+      } else {
+        is_man = "not a real man";
+      }
+      text("GAME OVER!", 190, 350);
+      text("score: " + str(this.level) + " (" + is_man + ")", 150, 400);
+      text("a Wu Zhe production", 160, 650);
+      noLoop();
+      return;
+    }
+
+    // update vy affected by gravity if in air
+    if (this.on_blk < 0) {
+      this.vy += gravity;
+    }
+
+    // on a fragile block
+    if (this.on_blk >= 0 && blks[this.on_blk].type == 3) {
+      if (blks[this.on_blk].vanish_timer <= 0) {
+        blks[this.on_blk].invisible = true;
+        step_into_air();
+        return;
+      } else {
+        blks[this.on_blk].decrease_timer();
+      }
+    }
+
+    // step off the block
+    if (this.on_blk >= 0 && !x_on_blk(this.on_blk)) {
+      step_into_air();
+      return;
+    }
+
+    // land on a block
+    if (this.on_blk < 0 && this.vy >= 0) {
+      for (byte i = 0; i < num; i++) {
+        if ((i == this.prev_on_blk) && (blks[i].type != 2)) continue;
+        if (!blks[i].invisible && person_on_blk(i)) {
+          land_on_blk(i);
+          return;
+        }
+      }
+    }
+
+    if (keyPressed == true && key == CODED) {
+      if (keyCode == LEFT) {
+        this.vx -= keypress_force;
+      } else if (keyCode == RIGHT) {
+        this.vx += keypress_force;
+      } else if (keyCode == DOWN && this.on_blk >= 0) {
+        this.vx = 0;
+      }
+    } else {
+      // update friction
+      if (this.vx > this.friction) {
+        this.vx -= this.friction;
+      } else if (this.vx < -this.friction) {
+        this.vx += this.friction;
+      } else {
+        this.vx = 0;
+      }
+    }
+
+  }
+
+  void step_into_air() {
+    this.prev_on_blk = this.on_blk;
+    this.on_blk = -1;
+    this.friction = air_friction;
+  }
+
+  void land_on_blk(byte i) {
+    this.on_blk = i;
+    this.y = blks[i].y;
+    this.vy = blks[i].vy;
+    this.friction = blk_friction;
+
+    switch(blks[i].type) {
+      case 0:
+        break;
+      case 1:
+        this.vx += blks[i].rx;
+        break;
+      case 2:
+        this.vy = spring_blk_force;
+        step_into_air();
+        break;
+      case 3:
+		break;
+      case 4:
+        this.health -= 20;
+        break;
+    }
+  }
+
+  void move() {
+    // take vx of the block into account
+    if (this.on_blk >= 0 && this.rx != blks[this.on_blk].rx) {
+      this.rx = blks[this.on_blk].rx;
+    } else if (this.rx != 0) {
+      this.rx = 0;
+    }
+
+    this.prex = this.x;
+    this.prey = this.y;
+
+    // stop moving if reach side boundaries of canvas
+    this.x += (this.vx + this.rx);
+    if (this.x - this.w/2 < 0) {
+      this.x = this.w/2;
+      this.vx = 0;
+    } else if (this.x + this.w/2 > width) {
+      this.x = width - this.w/2;
+      this.vx = 0;
+    }
+    this.y += this.vy;
+
+    this.mileage += this.vy;
+  }
+
+  void render() {
+    fill(#999999);
+    //rect(this.x - this.w/2, this.y - this.h, this.w, this.h);
+    image(p_img, this.x - this.w/2, this.y - this.h);
+    text("health: " + str(this.health), 15, 30);
+    text("score: " + str(this.level), 400, 30);
+  }
+}
+
+class Block {
+  float x, y; // top center
+  int w, h;
+  float vy;
+  float rx;
+  int vanish_timer = blk_vanish_timer;
+  boolean invisible = false;
+
+  ////////// BLOCK TYPE //////
+  // type 0: ordinary block
+  // type 1: rolling block
+  // type 2: spring block
+  // type 3: fragile block
+  // type 4: needle block
+  byte type;
+
+  Block(float x, float y, float vy, byte type) {
+    this.x = x;
+    this.y = y;
+    this.vy = vy;
+    this.type = type;
+    if (this.type == 1) {
+      this.rx = rolling_blk_rx;
+    } else {
+      this.rx = 0;
+    }
+    this.w = blk_w;
+    this.h = blk_h;
+    // should use width/height of the img when processing.js support of PImage is complete
+    //this.w = blk_imgs[0].width;
+    //this.h = blk_imgs[0].height;
+  }
+
+  void decrease_timer() {
+    this.vanish_timer--;
+  }
+
+  boolean outofscreen() {
+    return this.y + this.h <= 0;
+  }
+
+  void move() {
+    this.y += this.vy;
+  }
+
+  void render() {
+    if (this.invisible) {
+      return;
+    }
+    image(blk_imgs[this.type], this.x - this.w/2, this.y);
+  }
+}
